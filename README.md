@@ -7,8 +7,8 @@ The Coding spreadsheet, including codes for Who, What, and How, is available as 
 Included in the spreadsheet are per-cell comments for most of the coded data. These comments represent quotations or evidence directly from the paper for that code.
 
 # Analysis Scripts
-
+analysis.Rmd is an RMarkdown notebook for running analysis and filtering scripts.
 
 # CSV Files
-To ease analysis script, we include CSV of our coding from the Google Spreadsheet. 
+To ease use of the analysis script, we include CSV of our coding from the Google Spreadsheet. 
 
