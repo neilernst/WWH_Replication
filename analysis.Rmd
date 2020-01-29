@@ -1,0 +1,354 @@
+---
+title: "R Notebook"
+output: pdf
+---
+```{r load libraries}
+#asdevtools::install_github("tidyverse/googlesheets4")
+library(googlesheets4)
+library(tidyverse)
+# install.packages("devtools")
+# the dev version has some workarounds for Google Auth problems
+devtools::install_github("tidyverse/googledrive")
+library(googledrive)
+
+library(dplyr)
+library(ggalluvial)
+library(xtable)
+library(naniar)
+library(sqldf)
+library(VennDiagram)
+library(magrittr)
+library(here) #https://www.tidyverse.org/blog/2017/12/workflow-vs-script/
+```
+
+```{r load_data}
+coding_sheet = drive_get("2019 recoding")
+load_emse_from_google = function() {
+        data.emse_all = read_sheet(coding_sheet, sheet="emse2017", range="B2:AF85", col_names=TRUE)
+        data.emse = data.emse_all %>% select(c(2,3,5,24,25,26,27,28,29,30,31))
+        colnames(data.emse) = c("ID","title","authors", "strategy1","strategy2","quadrant","purpose","human","system","researcher","practitioners")
+        cols_to_factor = c("strategy1","strategy2","quadrant","purpose","human","system", "researcher","practitioners")
+        data.emse %<>% mutate_at(cols_to_factor, funs(factor(.)))
+        data.emse
+}
+
+load_icse2_from_google = function() {
+        icse2.data = read_sheet(coding_sheet, sheet="icse2017", range="A2:AE70", col_names=TRUE)
+        data.icse2 = icse2.data %>% select(c(3,4,5,24,25,26,27,28,29,30,31))
+        colnames(data.icse2) = c("ID","title","authors", "strategy1","strategy2","quadrant","purpose","human","system","researcher","practitioners")
+        cols_to_factor = c("strategy1","strategy2","quadrant","purpose","human","system", "researcher","practitioners")
+        data.icse2 %<>% mutate_at(cols_to_factor, funs(factor(.)))
+        data.icse2
+}
+
+load_from_disk = function(filename) {
+  data = read.csv(here("data",filename)) #here() figures out relative paths
+} 
+
+# EMSE 2017
+emse = load_from_disk("emse2017_coded_data_0123.csv")
+#emse = load_emse_from_google() # only if Google coding has changed
+emse_total = nrow(emse)
+# write.csv(emse,here("data","emse2017_coded_data_0123.csv"))
+## ICSE 2017
+# icse = load_icse2_from_google()
+icse = load_from_disk('icse2017-coded_data0120.csv')
+icse_total = nrow(icse)
+```
+
+```{r Create Quadrants}
+emse_df = subset(emse, select= -c(ID,title,authors,quadrant))#removes title/author/id etc.
+icse_df = subset(icse, select= -c(ID,title,authors,quadrant))
+
+emse_df = emse_df %>% mutate(venue = 'EMSE')
+icse_df = icse_df %>% mutate(venue = 'ICSE')
+both_df = bind_rows(icse_df,emse_df) #merge into one df
+
+both_df$human = as.logical(both_df$human)
+both_df$researcher = as.logical(both_df$researcher)
+both_df$system = as.logical(both_df$system)
+
+# create the new beneficiary column as boolean of the 3 original cols
+both_df = both_df %>% mutate(beneficiary = case_when( 
+  human & !researcher & !system ~ 'Human',
+  !human & researcher & !system ~ 'Researcher',
+  !human & !researcher & system ~ 'System',
+  human & system & !researcher ~ 'Human_System',
+  human & researcher & !system ~ 'Human_Researcher',
+  !human & researcher & system ~ 'System_Researcher',
+  human & researcher & system ~ 'All'))
+
+both_df$beneficiary = as.factor(both_df$beneficiary)
+
+human_strats = c("JudgmentStudy","SampleSurvey","FieldStudy","FieldExperiment","LaboratoryExperiment","ExperimentalSimulation")
+drop_strats = c("FormalTheory", "Meta") # remove these entries to re-instate meta
+# calculate mixed studies. This is the 'quadrant' column in the spreadsheet, but this gives us 
+# flexibility for the plotting.
+both_df = both_df %>% mutate(quadrant = case_when(
+  strategy1 == "ComputationalStudy" & (is.na(strategy2) | strategy2 == "ComputationalStudy" | strategy2 %in% drop_strats) ~ "Data",
+  strategy2 == "ComputationalStudy" & strategy1 %in% drop_strats ~ "Data",
+
+  strategy1 == "ComputationalStudy" & strategy2 %in% human_strats ~ "HumanData",
+  strategy2 == "ComputationalStudy" & strategy1 %in% human_strats ~ "HumanData",
+
+  strategy1 == "JudgmentStudy" & (is.na(strategy2) |  strategy2 %in% drop_strats) ~ "Respondent",
+  strategy1 == "SampleSurvey" &  (is.na(strategy2) | strategy2 %in% drop_strats) ~ "Respondent",
+  strategy1 == "FieldExperiment" & (is.na(strategy2) | strategy2 %in% drop_strats) ~ "Field",
+  strategy1 == "FieldStudy" & (is.na(strategy2) | strategy2 %in% drop_strats) ~ "Field",
+  strategy1 == "ExperimentalSimulation" & (is.na(strategy2) | strategy2 %in% drop_strats) ~ "Lab",
+  strategy1 == "LaboratoryExperiment" & (is.na(strategy2) | strategy2 %in% drop_strats) ~ "Lab",
+
+  strategy2 == "JudgmentStudy" & strategy1 %in% drop_strats ~ "Respondent",
+  strategy2 == "SampleSurvey" & strategy1 %in% drop_strats ~ "Respondent",
+  strategy2 == "FieldExperiment" &  strategy1 %in% drop_strats ~ "Field",
+  strategy2 == "FieldStudy" & strategy1 %in% drop_strats ~ "Field",
+  strategy2 == "ExperimentalSimulation" &  strategy1 %in% drop_strats ~ "Lab",
+  strategy2 == "LaboratoryExperiment" &  strategy1 %in% drop_strats ~ "Lab",
+  
+  strategy2 %in% human_strats & strategy1 %in% human_strats ~ "HumanHuman",
+  
+  # (strategy1 == "Meta" | strategy2 == "Meta") & is.na(strategy2) ~ "Meta",
+  strategy1 == "FormalTheory" & is.na(strategy2) ~ "Theory",
+  strategy1 == "Meta" & is.na(strategy2) ~ "Meta",
+
+  # for the paper, leave out FormalTheory and Meta studies entirely
+  # strategy2 == "FormalTheory" ~ NA,
+  # strategy2 == "Meta" ~ NA,
+))
+```
+"all" mixed should be 53 (strat1 & strat2 have entries)
+nrow(both_df %>% filter(!is.na(strategy2)))
+mixed with Meta = 2 with Strat2 = meta and 1 with Strat1 = Meta with something else
+nrow(both_df %>% filter(!is.na(strategy2) & strategy1 == "Meta"))
+mixed, formalTheory = 9 where FormalTHeory is strat2, 3 where FormalTheory = Strat1 with something else Strat2
+so 12 mixed = FormalTHeory, 3 mixed are Meta
+and quadrant=mixed = 41, after applying mutate above
+
+```{r create alluvia}
+
+both_df = subset(both_df, select=-c(human, system,researcher,strategy1,strategy2)) # don't need these boolean cols anymore
+
+alluvia = both_df %>% 
+  group_by(quadrant,purpose,beneficiary,venue) %>% 
+  summarize(count=n()) %>%
+  mutate(proportion = case_when(
+     venue == 'EMSE' ~ count/emse_total,
+     venue == 'ICSE' ~ count/icse_total
+  ))
+```
+
+```{r RQ1 - beneficiary}
+#TODO change table so it is All/ICSE/EMSE style
+ben_df = alluvia %>% group_by(beneficiary,venue) %>% summarize(count = sum(count))
+print(xtable(ben_df),booktabs=TRUE,include.rownames = FALSE)
+
+ggplot(ben_df, aes(x=beneficiary, y=count)) +
+  geom_col(aes(fill=venue) , position="dodge2") + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  theme(axis.title.x = element_blank(), axis.title.y = element_blank()) +
+  scale_fill_manual("venue", values = c("EMSE" = "orange", "ICSE" = "turquoise4"))+
+  geom_text(aes(label=count), position=position_dodge2(width=0.9), vjust=-0.15)
+
+ggsave(here("fig","both_benefits_bar.pdf"), width=6, height=4)
+
+```
+
+```{r Strategies for fig2}
+quad_df = alluvia %>% group_by(quadrant,venue) %>% summarize(count = sum(count))
+print(xtable(quad_df),booktabs=TRUE,include.rownames = FALSE)
+#TODO extend without mixed
+```
+
+```{r plot venn beneficiaries}
+# TODO change the data to refer to ben_df
+# obsolete - see venn.ipynb using matplotlib venn package
+# needs 3 sets of  (Abc, aBc, ABc, abC, AbC, aBC, ABC)
+# All A Human Human_Researcher  Human_System  B Researcher  C System  System_Researcher
+venn_data = both_df %>% select(beneficiary,venue)
+set_icse = venn_data %>% filter(venue=="ICSE")
+set_emse = venn_data %>% filter(venue=="EMSE")
+set_icse = set_icse %>% select(beneficiary)
+set_emse = set_emse %>% select(beneficiary)
+write.csv(set_emse, here("data","emse_venn.csv"),row.names=FALSE)
+write.csv(set_icse, here("data","icse_venn.csv"),row.names=FALSE)
+
+venn_data = {}
+venn_data["ABC"] = ben_df[1,3] + ben_df[2,3]
+venn_data["Abc"] = ben_df[3,3] + ben_df[4,3]
+venn_data["aBc"] = ben_df[9,3] + ben_df[10,3]
+venn_data["abC"] = ben_df[11,3] + ben_df[12,3]
+venn_data["ABc"] = ben_df[5,3] + ben_df[6,3]
+venn_data["aBC"] = ben_df[13,3] + ben_df[14,3]
+venn_data["AbC"] = ben_df[7,3] + ben_df[8,3]
+
+# venn.plot = draw.triple.venn(area1 = venn_data$Abc, area2 = venn_data$aBc, area3 = venn_data$abC,
+#                              n12 = venn_data$ABc, n23 = venn_data$aBC, n13 = venn_data$AbC, 
+#                              n123 = venn_data$ABC, # intersection of all three 
+#                            category = c("Human", "System", "Researcher"), 
+#                              lty = "blank",fill = c("skyblue", "pink1", "mediumorchid"))
+# tiff(filename = "Triple_Venn_diagram.tiff", compression = "lzw");grid.draw(venn.plot);dev.off();
+```
+
+```{r RQ2 find totals for Purpose/Strategy}
+purpose_df = alluvia %>% 
+  group_by(purpose,venue) %>% 
+  summarize(count = sum(count)) %>% 
+  mutate(proportion = case_when(
+     venue == 'EMSE' ~ count/emse_total,
+     venue == 'ICSE' ~ count/icse_total
+  ))
+print(xtable(purpose_df),booktabs=TRUE,include.rownames = FALSE)
+
+```
+
+```{r RQ4}
+# plot flow map
+#https://cran.r-project.org/web/packages/ggalluvial/vignettes/ggalluvial.html
+simplified = both_df %>% 
+    filter(beneficiary != 'Researcher') %>% # drop
+    filter(  quadrant!='Meta' & quadrant != 'Theory') %>% 
+    mutate(beneficiary = case_when(
+      beneficiary == "Human_Researcher" ~ 'Human',
+      beneficiary == "System_Researcher" ~ 'System',
+      beneficiary == "Human" ~ 'Human',
+      beneficiary == "System" ~ 'System',
+      beneficiary == "Human_System" ~ 'Human_System',
+      beneficiary == "Human_Researcher" ~ 'Human',
+      beneficiary == "All" ~ 'Human_System'
+    )) # this one drops researcher and re-bins those
+
+simplified_sum = simplified %>% 
+  group_by(quadrant,purpose,beneficiary,venue) %>% 
+  summarize(count=n()) %>%
+  mutate(proportion = case_when(
+     venue == 'EMSE' ~ count/emse_total,
+     venue == 'ICSE' ~ count/icse_total
+  ))
+
+simplified_sum$quadrant = factor(simplified_sum$quadrant,levels=c("Respondent","Field","Lab","HumanHuman","HumanData","Data"))
+icse_simplified = simplified_sum %>% filter(venue == 'ICSE')
+emse_simplified = simplified_sum %>% filter(venue == 'EMSE')
+plot_alluvial = function(filename) {
+  ggplot(filename,  
+       aes(y=count, 
+           axis1=beneficiary, 
+           axis2=quadrant, 
+           axis3=purpose)) +
+  geom_alluvium(aes(fill=quadrant),width=1/12) +
+  geom_stratum(width=1/12, fill="grey", color ="black") +
+  geom_label(stat="stratum",infer.label=TRUE, size=2) +
+  scale_x_discrete(labels = c("Beneficiary\n(Who)","Quadrant\n(How)","Purpose\n(What)"),limits=c("Beneficiary","Quadrant","Purpose"))+
+  scale_fill_brewer(palette="Spectral", direction=-1)+
+  # scale_fill_viridis(discrete=TRUE) +
+  theme_bw()
+  # ggtitle("Research Papers - What, How, Who")
+}
+plot_alluvial(icse_simplified)
+ggsave(here("fig","icse_alluvial.pdf"), width=6, height=4)
+plot_alluvial(emse_simplified)
+ggsave(here("fig","emse_alluvial.pdf"), width=6, height=4)
+```
+
+
+``` {r Practitioner}
+practitioner_df = both_df %>% group_by(practitioners, venue) %>% summarize(count = n()) %>% mutate(proportion = case_when(
+     venue == 'EMSE' ~ count/emse_total,
+     venue == 'ICSE' ~ count/icse_total
+))
+print(xtable(practitioner_df),booktabs=TRUE,include.rownames = FALSE)
+
+```
+
+```{r Triangulation and RQ3 Strategy}
+strats_emse = emse[c("strategy1","strategy2")]
+strats_icse = icse[c("strategy1","strategy2")]
+strats_emse = strats_emse %>% mutate(venue = 'EMSE')
+strats_icse = strats_icse %>% mutate(venue = 'ICSE')
+both_strats = bind_rows(strats_icse,strats_emse) #merge into one df
+strats_summary = both_strats %>%
+  group_by(strategy1,strategy2, venue) %>%
+  summarize(count = n())
+comp_study = strats_summary %>% 
+  filter(strategy1 == "ComputationalStudy" | strategy2 == "ComputationalStudy" ) %>%
+  group_by(venue) %>%
+  summarize(total = sum(count))
+
+# double-counts papers with two strategies!
+all_strats = both_strats %>% pivot_longer(cols=starts_with("stra"), values_drop_na=TRUE,names_to="strategy")
+vis = all_strats %>%
+  group_by(venue,value) %>%
+  summarize(count=n())
+print(xtable(vis),booktabs=TRUE,include.rownames = FALSE)
+```
+
+Now print the totals for quadrants, double counting papers with two strategies
+``` {r quadrant totals}
+new_all_strats = map_strategy_quadrant(all_strats, 'quadrant','value')
+new_all_strats = new_all_strats %>% group_by(quadrant,venue) %>% summarize(count = n())
+print(xtable(new_all_strats),booktabs=TRUE,include.rownames = FALSE)
+
+```
+
+``` {r triangulation by quadrant}
+triangulate_df = bind_rows(icse_df,emse_df) #merge into one df
+triangulate_df = map_strategy_quadrant(triangulate_df, 'quadrant1', 'strategy1')
+triangulate_df = map_strategy_quadrant(triangulate_df, 'quadrant2', 'strategy2')
+# 
+# ))  %>% mutate(quadrant2 = case_when(
+#   strategy2 == "ComputationalStudy" ~ "Data",
+#   strategy2 == "JudgmentStudy" | strategy2 == "SampleSurvey" ~ "Respondent",
+#   strategy2 == "FieldExperiment"  | strategy2 == "FieldStudy" ~ "Field",
+#   strategy2 == "ExperimentalSimulation" | strategy2 == "LaboratoryExperiment" ~ "Lab",
+#   strategy2 == "FormalTheory" ~ "Theory",
+#   strategy2 == "Meta" ~ "Meta"
+triangulate_df = triangulate_df %>% 
+  group_by(venue,quadrant1,quadrant2) %>% 
+  summarize(count = n())
+
+print(xtable(triangulate_df),booktabs=TRUE,include.rownames = FALSE)
+```
+
+``` {r utility functions}
+map_strategy_quadrant = function(df, new_col, compare_col) {
+  new_df = df %>% mutate(!!new_col := case_when(
+  get(compare_col) == "ComputationalStudy" ~ "Data",
+  get(compare_col)  == "JudgmentStudy" | get(compare_col)  == "SampleSurvey" ~ "Respondent",
+  get(compare_col)  == "FieldExperiment"  | get(compare_col)  == "FieldStudy" ~ "Field",
+  get(compare_col)  == "ExperimentalSimulation" | get(compare_col)  == "LaboratoryExperiment" ~ "Lab",
+  get(compare_col)  == "FormalTheory" ~ "Theory",
+  get(compare_col)  == "Meta" ~ "Meta"
+))
+}
+```
+
+
+
+``` {r plotRQ3}
+all_strats$value = recode(all_strats$value, "ComputationalStudy"="Data")
+all_strats$value = factor(all_strats$value, levels=c("SampleSurvey","JudgmentStudy","LaboratoryExperiment","ExperimentalSimulation",
+                                                        "FieldExperiment","FieldStudy","Meta","FormalTheory","Data"))
+
+ggplot(all_strats,aes(value)) +
+  geom_bar(aes(fill=venue),position = "dodge2") + 
+  theme_bw() + 
+  theme(axis.title.x = element_blank(), axis.title.y = element_blank()) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  scale_fill_manual("venue", values = c("EMSE" = "orange", "ICSE" = "turquoise4"))+
+  geom_text(stat="count",aes(fill=venue,label=..count..), position=position_dodge2(width=0.9), vjust=-0.15)
+
+
+ggsave(here("fig","both_strategies_bar.pdf"), width=6, height=4)
+
+```
+
+How many ICSE PC/PB members also sit on the EMSE editorial board?
+``` {r overlap of PC/EB}
+emse_ed = read.csv(here("data","/emse2020-eds.csv"),header=FALSE)
+icse_pc = read.csv(here("data","/icse2020-pc.csv"), header=FALSE)
+emse_ed$in_emse = TRUE
+icse_pc$in_icse = TRUE
+res = merge(emse_ed,icse_pc,all=TRUE)
+match = res %>% filter(in_emse & in_icse)
+
+```
