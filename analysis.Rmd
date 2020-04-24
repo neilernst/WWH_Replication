@@ -9,6 +9,8 @@ library(tidyverse)
 # install.packages("devtools")
 # the dev version has some workarounds for Google Auth problems
 devtools::install_github("tidyverse/googledrive")
+#if(!require(devtools)) install.packages("devtools")
+devtools::install_github("krassowski/complex-upset")
 library(googledrive)
 
 library(dplyr)
@@ -19,10 +21,12 @@ library(sqldf)
 library(VennDiagram)
 library(magrittr)
 library(here) #https://www.tidyverse.org/blog/2017/12/workflow-vs-script/
+library(ComplexUpset)
+
 ```
 
 ```{r load_data}
-coding_sheet = drive_get("2019 recoding")
+#coding_sheet = drive_get("2019 recoding")
 load_emse_from_google = function() {
         data.emse_all = read_sheet(coding_sheet, sheet="emse2017", range="B2:AF85", col_names=TRUE)
         data.emse = data.emse_all %>% select(c(2,3,5,24,25,26,27,28,29,30,31))
@@ -160,35 +164,7 @@ print(xtable(quad_df),booktabs=TRUE,include.rownames = FALSE)
 #TODO extend without mixed
 ```
 
-```{r plot venn beneficiaries}
-# TODO change the data to refer to ben_df
-# obsolete - see venn.ipynb using matplotlib venn package
-# needs 3 sets of  (Abc, aBc, ABc, abC, AbC, aBC, ABC)
-# All A Human Human_Researcher  Human_System  B Researcher  C System  System_Researcher
-venn_data = both_df %>% select(beneficiary,venue)
-set_icse = venn_data %>% filter(venue=="ICSE")
-set_emse = venn_data %>% filter(venue=="EMSE")
-set_icse = set_icse %>% select(beneficiary)
-set_emse = set_emse %>% select(beneficiary)
-write.csv(set_emse, here("data","emse_venn.csv"),row.names=FALSE)
-write.csv(set_icse, here("data","icse_venn.csv"),row.names=FALSE)
 
-venn_data = {}
-venn_data["ABC"] = ben_df[1,3] + ben_df[2,3]
-venn_data["Abc"] = ben_df[3,3] + ben_df[4,3]
-venn_data["aBc"] = ben_df[9,3] + ben_df[10,3]
-venn_data["abC"] = ben_df[11,3] + ben_df[12,3]
-venn_data["ABc"] = ben_df[5,3] + ben_df[6,3]
-venn_data["aBC"] = ben_df[13,3] + ben_df[14,3]
-venn_data["AbC"] = ben_df[7,3] + ben_df[8,3]
-
-# venn.plot = draw.triple.venn(area1 = venn_data$Abc, area2 = venn_data$aBc, area3 = venn_data$abC,
-#                              n12 = venn_data$ABc, n23 = venn_data$aBC, n13 = venn_data$AbC, 
-#                              n123 = venn_data$ABC, # intersection of all three 
-#                            category = c("Human", "System", "Researcher"), 
-#                              lty = "blank",fill = c("skyblue", "pink1", "mediumorchid"))
-# tiff(filename = "Triple_Venn_diagram.tiff", compression = "lzw");grid.draw(venn.plot);dev.off();
-```
 
 ```{r RQ2 find totals for Purpose/Strategy}
 purpose_df = alluvia %>% 
@@ -350,5 +326,84 @@ emse_ed$in_emse = TRUE
 icse_pc$in_icse = TRUE
 res = merge(emse_ed,icse_pc,all=TRUE)
 match = res %>% filter(in_emse & in_icse)
+
+```
+
+
+```{r plot venn beneficiaries}
+# TODO change the data to refer to ben_df
+# obsolete - see venn.ipynb using matplotlib venn package
+# needs 3 sets of  (Abc, aBc, ABc, abC, AbC, aBC, ABC)
+# All A Human Human_Researcher  Human_System  B Researcher  C System  System_Researcher
+venn_data = both_df %>% select(beneficiary,venue)
+# set_icse = venn_data %>% filter(venue=="ICSE")
+# set_emse = venn_data %>% filter(venue=="EMSE")
+# set_icse = set_icse %>% select(beneficiary)
+# set_emse = set_emse %>% select(beneficiary)
+# write.csv(set_emse, here("data","emse_venn.csv"),row.names=FALSE)
+# write.csv(set_icse, here("data","icse_venn.csv"),row.names=FALSE)
+
+#venn_data = {}
+# venn_data["ABC"] = ben_df[1,3] + ben_df[2,3]
+# venn_data["Abc"] = ben_df[3,3] + ben_df[4,3]
+# venn_data["aBc"] = ben_df[9,3] + ben_df[10,3]
+# venn_data["abC"] = ben_df[11,3] + ben_df[12,3]
+# venn_data["ABc"] = ben_df[5,3] + ben_df[6,3]
+# venn_data["aBC"] = ben_df[13,3] + ben_df[14,3]
+# venn_data["AbC"] = ben_df[7,3] + ben_df[8,3]
+
+# venn.plot = draw.triple.venn(area1 = venn_data$Abc, area2 = venn_data$aBc, area3 = venn_data$abC,
+#                              n12 = venn_data$ABc, n23 = venn_data$aBC, n13 = venn_data$AbC, 
+#                              n123 = venn_data$ABC, # intersection of all three 
+#                            category = c("Human", "System", "Researcher"), 
+#                              lty = "blank",fill = c("skyblue", "pink1", "mediumorchid"))
+# tiff(filename = "Triple_Venn_diagram.tiff", compression = "lzw");grid.draw(venn.plot);dev.off();
+```
+
+``` {r Upset Applied to data}
+
+venn_data = both_df %>% select(beneficiary,venue)
+cats = c("Human","Researcher","System")
+names(cats) = cats
+venn_data$beneficiary = venn_data$beneficiary %>% recode(All = 'Human_System_Researcher')
+ben_mat <- map_dfc(venn_data$beneficiary, str_detect, cats) %>%
+    data.frame() %>%
+    t() %>% 
+    as_tibble()
+ben_mat = ben_mat %>% add_column(Venue = venn_data$venue)
+# ben_mat = mutate(ben_mat, Venue = case_when(Venue == "ICSE" ~ TRUE, Venue == "EMSE" ~ FALSE))
+
+colnames(ben_mat)  <- c(cats,"Venue")
+
+upset(data = ben_mat, 
+      intersect = cats,
+      set_sizes = FALSE,
+      annotations = list(
+        'Venue'=list(
+            aes=aes(x=intersection, fill=Venue),
+            geom=list(
+                geom_bar(stat='count', position='fill'),
+                scale_y_continuous(labels=scales::percent_format()),
+                scale_fill_manual(values=c(
+                    'ICSE'='#E41A1C', 'EMSE'='#377EB8'
+                ))
+            )
+        )
+      ),
+      # set_sizes=upset_set_size(
+      #       width=0.4
+      # ),
+      # themes=upset_modify_themes(
+      #   list(
+      #       'overall_sizes'=theme(axis.text.x=element_text(angle=90))
+      #   )
+      # ),
+      name="Beneficiary Groupings by Frequency. Total is 151 papers.",
+      min_size = 0,
+      width_ratio = 0.125) + 
+      labs(title = "Co-occurrence of Beneficiaries",
+         caption = "Idea: @kjhealy/ComplexUpset")
+# upset_query(set=Venue_ICSE, color='red', fill='red')
+ggsave(here("fig","upset.pdf"), width=6, height=4)
 
 ```
