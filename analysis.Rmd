@@ -8,9 +8,9 @@ library(googlesheets4)
 library(tidyverse)
 # install.packages("devtools")
 # the dev version has some workarounds for Google Auth problems
-devtools::install_github("tidyverse/googledrive")
+#devtools::install_github("tidyverse/googledrive")
 #if(!require(devtools)) install.packages("devtools")
-devtools::install_github("krassowski/complex-upset")
+#devtools::install_github("krassowski/complex-upset")
 library(googledrive)
 
 library(dplyr)
@@ -205,6 +205,9 @@ simplified_sum = simplified %>%
 simplified_sum$quadrant = factor(simplified_sum$quadrant,levels=c("Respondent","Field","Lab","HumanHuman","HumanData","Data"))
 icse_simplified = simplified_sum %>% filter(venue == 'ICSE')
 emse_simplified = simplified_sum %>% filter(venue == 'EMSE')
+```
+
+``` {r plot alluvial}
 plot_alluvial = function(filename) {
   ggplot(filename,  
        aes(y=count, 
@@ -213,10 +216,11 @@ plot_alluvial = function(filename) {
            axis3=purpose)) +
   geom_alluvium(aes(fill=quadrant),width=1/12) +
   geom_stratum(width=1/12, fill="grey", color ="black") +
-  geom_label(stat="stratum",infer.label=TRUE, size=2) +
+  geom_label(stat="stratum",infer.label=TRUE,size=2) +
   scale_x_discrete(labels = c("Beneficiary\n(Who)","Quadrant\n(How)","Purpose\n(What)"),limits=c("Beneficiary","Quadrant","Purpose"))+
   scale_fill_brewer(palette="Spectral", direction=-1)+
   # scale_fill_viridis(discrete=TRUE) +
+   ylab("Number of Papers") +
   theme_bw()
   # ggtitle("Research Papers - What, How, Who")
 }
