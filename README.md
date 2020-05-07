@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/236884538.svg)](https://zenodo.org/badge/latestdoi/236884538)
+
 # WWH_Replication
 Replication Data for EMSE paper "The Who-What-How of Software Engineering Research"
 
