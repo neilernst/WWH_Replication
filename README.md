@@ -12,6 +12,7 @@ analysis.Rmd is an RMarkdown notebook for running analysis and filtering scripts
 # CSV Files
 To ease use of the analysis script, we include CSV of our coding from the Google Spreadsheet. 
 
+# R session info
 ```
 > sessionInfo()
 R version 3.6.3 (2020-02-29)
